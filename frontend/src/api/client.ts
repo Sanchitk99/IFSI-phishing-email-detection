@@ -8,7 +8,7 @@
 const getApiBaseUrl = (): string => {
   try {
     const metaEnv = (import.meta as unknown as { env?: { VITE_API_BASE_URL?: string } })?.env;
-    if (metaEnv?.VITE_API_BASE_URL) {
+    if (metaEnv?.VITE_API_BASE_URL !== undefined && metaEnv.VITE_API_BASE_URL !== '') {
       return metaEnv.VITE_API_BASE_URL.replace(/\/+$/, '');
     }
   } catch {
@@ -20,11 +20,16 @@ const getApiBaseUrl = (): string => {
       typeof globalThis !== 'undefined'
         ? (globalThis as unknown as { process?: { env?: Record<string, string> } }).process
         : undefined;
-    if (globalProc?.env?.VITE_API_BASE_URL) {
+    if (globalProc?.env?.VITE_API_BASE_URL !== undefined && globalProc.env.VITE_API_BASE_URL !== '') {
       return globalProc.env.VITE_API_BASE_URL.replace(/\/+$/, '');
     }
   } catch {
     // Ignore in browser runtimes
+  }
+
+  // In production browser outside local Vite dev ports (5173/4173), use same-origin relative URLs
+  if (typeof window !== 'undefined' && window.location.port !== '5173' && window.location.port !== '4173') {
+    return '';
   }
 
   return 'http://localhost:8000';
@@ -111,6 +116,10 @@ export interface ClassificationResult {
     source: 'model' | 'pattern';
     text: string;
   }>;
+  raw_probability?: number | null;
+  decision_threshold?: number | null;
+  threshold_margin?: number | null;
+  domain_analysis?: Record<string, unknown> | null;
 }
 
 export interface ModelCatalogEntry {

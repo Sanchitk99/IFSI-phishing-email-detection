@@ -11,9 +11,7 @@ import time
 from pathlib import Path
 from typing import Any, Sequence
 
-import faiss
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
 from .baseline import compute_metrics
 from .data_loader import require_complete_manifest, require_primary_split_manifest
@@ -59,18 +57,41 @@ def _git_commit() -> str:
     return result.stdout.strip() or "unknown"
 
 
+class _VectorIndexProxy:
+    """Lightweight proxy for retriever.index when loaded via NumPy exemplars."""
+
+    def __init__(self, ntotal: int) -> None:
+        self.ntotal = ntotal
+
+    def __repr__(self) -> str:
+        return f"<VectorIndexProxy ntotal={self.ntotal}>"
+
+
 class FAISSRetriever:
-    """Vector similarity retriever using sentence-transformers and FAISS IndexFlatIP (cosine similarity)."""
+    """Vector similarity retriever using ONNX/sentence-transformers and NumPy/FAISS."""
 
     def __init__(
         self,
         model_name: str = DEFAULT_EMBEDDING_MODEL,
-        model: SentenceTransformer | None = None,
+        model: Any | None = None,
+        exemplars: np.ndarray | None = None,
     ) -> None:
         self.model_name = model_name
-        self.model = model or SentenceTransformer(model_name)
-        self.index: faiss.Index | None = None
+        self.exemplars: np.ndarray | None = exemplars
+        self.index: Any | None = _VectorIndexProxy(len(exemplars)) if exemplars is not None else None
         self.metadata: list[dict[str, Any]] = []
+        self.index_metadata: dict[str, Any] = {}
+
+        if model is not None:
+            self.model = model
+        else:
+            try:
+                from .onnx_embed import ONNXEmbeddingModel
+                self.model = ONNXEmbeddingModel(model_name=model_name)
+            except Exception as exc:
+                logger.debug("ONNX embedding model unavailable (%s); falling back to SentenceTransformer", exc)
+                from sentence_transformers import SentenceTransformer
+                self.model = SentenceTransformer(model_name)
 
     @classmethod
     def build_from_train_split(
@@ -118,13 +139,21 @@ class FAISSRetriever:
         )
         embeddings = np.ascontiguousarray(embeddings, dtype=np.float32)
 
+        import faiss
         dim = embeddings.shape[1]
         index = faiss.IndexFlatIP(dim)
         index.add(embeddings)
         retriever.index = index
+        retriever.exemplars = embeddings
+        st_version = "unknown"
+        try:
+            import sentence_transformers
+            st_version = getattr(sentence_transformers, "__version__", "unknown")
+        except ImportError:
+            pass
         retriever.index_metadata = {
             "embedding_model": model_name,
-            "embedding_model_version": getattr(__import__("sentence_transformers"), "__version__", "unknown"),
+            "embedding_model_version": st_version,
             "faiss_version": getattr(faiss, "__version__", "unknown"),
             "index_type": "IndexFlatIP",
             "top_k_default": 3,
@@ -143,10 +172,15 @@ class FAISSRetriever:
         target_dir = Path(directory)
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        if self.index is None:
+        if self.index is None and self.exemplars is None:
             raise ValueError("Cannot save uninitialized index")
 
-        faiss.write_index(self.index, str(target_dir / "train.index"))
+        if self.exemplars is not None:
+            np.save(target_dir / "exemplars.npy", self.exemplars)
+
+        if self.index is not None and not isinstance(self.index, _VectorIndexProxy):
+            import faiss
+            faiss.write_index(self.index, str(target_dir / "train.index"))
         with (target_dir / "metadata.json").open("w", encoding="utf-8") as f:
             json.dump({
                 "model_name": self.model_name,
@@ -156,21 +190,33 @@ class FAISSRetriever:
 
     @classmethod
     def load(cls, directory: Path | str) -> FAISSRetriever:
-        """Load persisted FAISS index and metadata from disk."""
+        """Load persisted index and metadata from disk (prefers NumPy exemplars over FAISS)."""
         target_dir = Path(directory)
         meta_file = target_dir / "metadata.json"
+        npy_file = target_dir / "exemplars.npy"
         index_file = target_dir / "train.index"
 
-        if not meta_file.exists() or not index_file.exists():
-            raise FileNotFoundError(f"Missing index or metadata in {target_dir}")
+        if not meta_file.exists():
+            raise FileNotFoundError(f"Missing metadata.json in {target_dir}")
 
         with meta_file.open("r", encoding="utf-8") as f:
             meta_data = json.load(f)
 
         retriever = cls(model_name=meta_data.get("model_name", DEFAULT_EMBEDDING_MODEL))
-        retriever.index = faiss.read_index(str(index_file))
         retriever.metadata = meta_data["records"]
         retriever.index_metadata = meta_data.get("index_metadata", {})
+
+        if npy_file.exists():
+            retriever.exemplars = np.load(npy_file)
+            retriever.index = _VectorIndexProxy(len(retriever.exemplars))
+            logger.info("Loaded %d exemplars from %s using NumPy", len(retriever.exemplars), npy_file)
+        elif index_file.exists():
+            import faiss
+            retriever.index = faiss.read_index(str(index_file))
+            logger.info("Loaded %d exemplars from %s using FAISS", retriever.index.ntotal, index_file)
+        else:
+            raise FileNotFoundError(f"Missing exemplars.npy or train.index in {target_dir}")
+
         return retriever
 
     def validate_against_splits(self, train_path: Path | str, test_path: Path | str) -> None:
@@ -203,8 +249,8 @@ class FAISSRetriever:
 
     def retrieve(self, query_text: str, top_k: int = 3, max_text_len: int = 1500) -> list[dict[str, Any]]:
         """Retrieve top-k most similar labeled training emails for a query email."""
-        if self.index is None:
-            raise ValueError("FAISS index is not initialized")
+        if self.exemplars is None and self.index is None:
+            raise ValueError("FAISS index or exemplars are not initialized")
 
         query_emb = self.model.encode(
             [query_text[:max_text_len]],
@@ -213,11 +259,22 @@ class FAISSRetriever:
         )
         query_emb = np.ascontiguousarray(query_emb, dtype=np.float32)
 
+        if self.exemplars is not None:
+            scores = np.dot(self.exemplars, query_emb[0])
+            top_indices = np.argsort(-scores)[:top_k]
+            retrieved: list[dict[str, Any]] = []
+            for idx in top_indices:
+                if 0 <= idx < len(self.metadata):
+                    item = dict(self.metadata[idx])
+                    item["similarity_score"] = float(scores[idx])
+                    retrieved.append(item)
+            return retrieved
+
         distances, indices = self.index.search(query_emb, top_k)
         retrieved: list[dict[str, Any]] = []
 
         for score, idx in zip(distances[0], indices[0]):
-            if idx >= 0 and idx < len(self.metadata):
+            if 0 <= idx < len(self.metadata):
                 item = dict(self.metadata[idx])
                 item["similarity_score"] = float(score)
                 retrieved.append(item)
@@ -480,3 +537,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+NumPyRetriever = FAISSRetriever

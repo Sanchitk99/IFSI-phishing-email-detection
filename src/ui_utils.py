@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from core import (
     apply_unmarked_injection,
+    check_groq_service,
     check_ollama_service,
     classify_all_methods,
     classify_email_m1,
@@ -14,6 +15,8 @@ from core import (
     classify_email_m3,
     classify_email_m4,
     evaluate_method_disagreements,
+    get_llm_provider,
+    _is_ollama_base_url,
     get_m1_model,
     get_rag_retriever,
     get_random_unmarked_injection,
@@ -62,39 +65,44 @@ def apply_custom_css() -> None:
             border-radius: 9999px;
             font-weight: 600;
             display: inline-block;
-            border: 1px solid #fcd34d;
+            border: 1px solid #fbbf24;
         }
-        .card-container {
-            border: 1px solid #e2e8f0;
-            border-radius: 10px;
+        .phish-badge-neutral {
+            background-color: #f3f4f6;
+            color: #374151;
+            padding: 4px 12px;
+            border-radius: 9999px;
+            font-weight: 600;
+            display: inline-block;
+            border: 1px solid #d1d5db;
+        }
+        .phish-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
             padding: 16px;
-            margin-bottom: 16px;
+            margin-bottom: 12px;
             background-color: #ffffff;
         }
-        .stat-box {
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
+        .phish-card-alert {
+            border: 1px solid #fca5a5;
             border-radius: 8px;
-            padding: 12px;
-            text-align: center;
+            padding: 16px;
+            background-color: #fef2f2;
+            margin-bottom: 12px;
         }
-        .stat-value {
-            font-size: 1.6rem;
-            font-weight: 700;
-            color: #0f172a;
-        }
-        .stat-label {
-            font-size: 0.82rem;
-            color: #64748b;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
+        .phish-card-success {
+            border: 1px solid #86efac;
+            border-radius: 8px;
+            padding: 16px;
+            background-color: #f0fdf4;
+            margin-bottom: 12px;
         }
         .card-consensus {
-            border: 1.5px solid #cbd5e1;
+            border: 1.5px solid #10b981 !important;
             border-radius: 12px;
             padding: 16px;
-            background-color: #ffffff;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            background-color: #f0fdf4 !important;
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
             margin-bottom: 12px;
         }
         .card-disagreement-warning {
@@ -165,6 +173,9 @@ __all__ = [
     "get_m1_model",
     "get_rag_retriever",
     "check_ollama_service",
+    "check_groq_service",
+    "get_llm_provider",
+    "_is_ollama_base_url",
     "classify_email_m1",
     "_call_ollama_json",
     "classify_email_m2",

@@ -12,6 +12,7 @@ _EXPORTS = {
     "get_m1_model": (".models", "get_m1_model"),
     "get_rag_retriever": (".models", "get_rag_retriever"),
     "check_ollama_service": (".models", "check_ollama_service"),
+    "check_groq_service": (".models", "check_groq_service"),
     "load_unmarked_injection_templates": (".injections", "load_unmarked_injection_templates"),
     "get_random_unmarked_injection": (".injections", "get_random_unmarked_injection"),
     "apply_unmarked_injection": (".injections", "apply_unmarked_injection"),
@@ -23,6 +24,8 @@ _EXPORTS = {
     "classify_email_m4": (".inference", "classify_email_m4"),
     "classify_all_methods": (".inference", "classify_all_methods"),
     "evaluate_method_disagreements": (".inference", "evaluate_method_disagreements"),
+    "get_llm_provider": (".inference", "get_llm_provider"),
+    "_is_ollama_base_url": (".inference", "_is_ollama_base_url"),
     "discover_models": (".model_config", "discover_models"),
 }
 

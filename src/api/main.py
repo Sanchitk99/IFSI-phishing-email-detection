@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import json
 import time
@@ -23,6 +24,7 @@ from pydantic import BaseModel, Field
 from core import (
     apply_unmarked_injection,
     check_ollama_service,
+    check_groq_service,
     classify_all_methods,
     classify_email_m1,
     classify_email_m2,
@@ -55,16 +57,25 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Enable CORS for React (Vite) development server
+# Enable CORS for React frontend (local Vite, Vercel, Netlify, and custom domains)
+cors_origins_env = os.getenv("CORS_ORIGINS", "")
+allowed_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+    "http://localhost:3000",
+]
+if cors_origins_env:
+    for origin in cors_origins_env.split(","):
+        origin_clean = origin.strip()
+        if origin_clean and origin_clean not in allowed_origins:
+            allowed_origins.append(origin_clean)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:4173",
-        "http://127.0.0.1:4173",
-    ],
-    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1):(?:517[3-9]|41[7-9]\d)",
+    allow_origins=["*"] if cors_origins_env == "*" else allowed_origins,
+    allow_origin_regex=r"https?://.*(\.vercel\.app|\.netlify\.app|localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -96,8 +107,19 @@ class EnvironmentHealth(BaseModel):
     package: str = Field("phishbench v0.1.0", description="Installed phishbench package version")
 
 
+class LLMProviderHealth(BaseModel):
+    name: str = Field(..., description="Active LLM provider ('ollama' or 'groq')")
+    connected: bool = Field(..., description="Whether provider is verified reachable")
+    status: str = Field(..., description="Provider status ('online', 'offline', 'missing_api_key', etc.)")
+    model: str = Field(..., description="Configured active model")
+    api_base: str = Field(..., description="Provider API base endpoint")
+    message: str = Field(..., description="Detailed status description")
+    available_models: list[str] = Field(default_factory=list, description="Available models if discovered")
+
+
 class HealthResponse(BaseModel):
     status: str = Field(..., description="Overall environment status ('ok' or 'degraded')")
+    provider: LLMProviderHealth = Field(..., description="Configured inference provider health")
     ollama: OllamaHealth
     faiss: FaissHealth
     environment: EnvironmentHealth
@@ -145,6 +167,10 @@ class ClassificationResult(BaseModel):
     has_injection: bool | None = Field(None, description="M4 Call 1 prompt injection detection flag")
     is_phishing_only: bool | None = Field(None, description="M4 Call 2 pure boolean phishing flag")
     injection_spans: list[dict[str, Any]] = Field(default_factory=list)
+    raw_probability: float | None = Field(None, description="Unthresholded raw positive class probability (M1)")
+    decision_threshold: float | None = Field(None, description="Decision threshold tau applied for binary verdict")
+    threshold_margin: float | None = Field(None, description="Signed distance from calibrated decision threshold")
+    domain_analysis: dict[str, Any] | None = Field(None, description="Structured domain and sender telemetry (M4)")
 
 
 class MethodStyle(BaseModel):
@@ -232,23 +258,12 @@ def _format_email_text(text: str, subject: str = "", sender: str = "") -> str:
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
 def get_health() -> HealthResponse:
-    """Check health and availability of Ollama daemon, FAISS RAG index, and local environment.
+    """Check health and availability of configured LLM provider, vector index, and runtime environment."""
+    provider_name = os.getenv("LLM_PROVIDER", "").strip().lower()
+    if not provider_name:
+        provider_name = "groq" if os.getenv("GROQ_API_KEY", "").strip() else "ollama"
 
-    Matches what app.py's health monitor currently shows:
-    - Ollama daemon connection status and available models
-    - FAISS RAG Index status, location, and exemplar count
-    - Python runtime and package version
-    """
-    is_ollama_up, available_models = check_ollama_service()
     rag_retriever = get_rag_retriever()
-
-    if is_ollama_up:
-        ollama_status = "online"
-        ollama_msg = f"Connected (127.0.0.1:11434) - Models: {', '.join(available_models) if available_models else 'None'}"
-    else:
-        ollama_status = "offline"
-        ollama_msg = "Offline or unreachable. Start with 'ollama serve'."
-
     if rag_retriever is not None:
         index_size = getattr(getattr(rag_retriever, "index", None), "ntotal", 0)
         faiss_status = "loaded"
@@ -260,18 +275,63 @@ def get_health() -> HealthResponse:
         faiss_msg = "Not loaded. Build with 'python -m phishbench.rag'."
         faiss_loaded = False
 
-    py_version = f"Python {sys.version.split()[0]}"
-    overall_status = "ok" if (is_ollama_up and faiss_loaded) else "degraded"
+    if provider_name == "groq":
+        groq_key = os.getenv("GROQ_API_KEY", "").strip()
+        groq_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+        groq_base = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+        is_groq_up, groq_status, groq_msg, groq_models = check_groq_service(
+            api_key=groq_key, api_base=groq_base
+        )
+        provider_health = LLMProviderHealth(
+            name="groq",
+            connected=is_groq_up,
+            status=groq_status,
+            model=groq_model,
+            api_base=groq_base,
+            message=groq_msg,
+            available_models=groq_models,
+        )
+        ollama_health = OllamaHealth(
+            connected=False,
+            status="bypassed",
+            api_base="http://127.0.0.1:11434",
+            available_models=[],
+            message="Ollama bypassed; Groq configured as active cloud provider.",
+        )
+        overall_status = "ok" if (is_groq_up and faiss_loaded) else "degraded"
+    else:
+        is_ollama_up, available_models = check_ollama_service()
+        if is_ollama_up:
+            ollama_status = "online"
+            ollama_msg = f"Connected (127.0.0.1:11434) - Models: {', '.join(available_models) if available_models else 'None'}"
+        else:
+            ollama_status = "offline"
+            ollama_msg = "Offline or unreachable. Start with 'ollama serve'."
 
-    return HealthResponse(
-        status=overall_status,
-        ollama=OllamaHealth(
+        ollama_health = OllamaHealth(
             connected=is_ollama_up,
             status=ollama_status,
             api_base="http://127.0.0.1:11434",
             available_models=available_models,
             message=ollama_msg,
-        ),
+        )
+        provider_health = LLMProviderHealth(
+            name="ollama",
+            connected=is_ollama_up,
+            status=ollama_status,
+            model=DEFAULT_LIVE_MODEL,
+            api_base="http://127.0.0.1:11434",
+            message=ollama_msg,
+            available_models=available_models,
+        )
+        overall_status = "ok" if (is_ollama_up and faiss_loaded) else "degraded"
+
+    py_version = f"Python {sys.version.split()[0]}"
+
+    return HealthResponse(
+        status=overall_status,
+        provider=provider_health,
+        ollama=ollama_health,
         faiss=FaissHealth(
             loaded=faiss_loaded,
             status=faiss_status,
@@ -591,14 +651,41 @@ def get_presets() -> dict[str, dict[str, str]]:
     return load_preset_samples()
 
 
-@app.get("/", tags=["Root"])
-def root() -> dict[str, Any]:
-    """Root metadata endpoint with links to documentation and health status."""
-    return {
-        "name": "IFSI Phishing Detection Benchmark API",
-        "version": "0.1.0",
-        "docs_url": "/docs",
-        "openapi_url": "/openapi.json",
-        "health_url": "/health",
-        "status": "online",
-    }
+frontend_dist = root_dir / "frontend" / "dist"
+if frontend_dist.is_dir() and (frontend_dist / "index.html").is_file():
+    from fastapi import Request
+    from fastapi.responses import FileResponse, JSONResponse
+    from fastapi.staticfiles import StaticFiles
+
+    assets_dir = frontend_dist / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str, request: Request):
+        file_path = frontend_dist / full_path
+        if full_path and file_path.is_file():
+            return FileResponse(file_path)
+        # If root requested without text/html Accept header (e.g. API/test clients), serve API metadata JSON
+        if not full_path and "text/html" not in request.headers.get("accept", ""):
+            return JSONResponse({
+                "name": "IFSI Phishing Detection Benchmark API",
+                "version": "0.1.0",
+                "docs_url": "/docs",
+                "openapi_url": "/openapi.json",
+                "health_url": "/health",
+                "status": "online",
+            })
+        return FileResponse(frontend_dist / "index.html")
+else:
+    @app.get("/", tags=["Root"])
+    def root() -> dict[str, Any]:
+        """Root metadata endpoint with links to documentation and health status."""
+        return {
+            "name": "IFSI Phishing Detection Benchmark API",
+            "version": "0.1.0",
+            "docs_url": "/docs",
+            "openapi_url": "/openapi.json",
+            "health_url": "/health",
+            "status": "online",
+        }

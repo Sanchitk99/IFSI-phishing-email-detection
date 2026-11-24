@@ -172,6 +172,7 @@ export const LiveTestPage: React.FC = () => {
   // Preset Samples State
   const [presets, setPresets] = useState<Record<string, PresetSample>>({});
   const [selectedPresetKey, setSelectedPresetKey] = useState<string>('');
+  const [customExpectedLabel, setCustomExpectedLabel] = useState<'unlabeled' | 'phishing' | 'legitimate'>('unlabeled');
   const [loadingPresets, setLoadingPresets] = useState(true);
   const [isUsingFallback, setIsUsingFallback] = useState(false);
 
@@ -250,11 +251,29 @@ export const LiveTestPage: React.FC = () => {
     };
   }, []);
 
+  const isPresetModified = Boolean(
+    selectedPresetKey &&
+    presets[selectedPresetKey] &&
+    (subject.trim() !== (presets[selectedPresetKey].subject || '').trim() ||
+     sender.trim() !== (presets[selectedPresetKey].sender || '').trim() ||
+     emailText.trim() !== (presets[selectedPresetKey].body || '').trim())
+  );
+
   const handleSelectPreset = (key: string) => {
     const sample = presets[key];
     if (!sample) return;
     setSelectedPresetKey(key);
+    setCustomExpectedLabel('unlabeled');
     setEmailInputMode('preset');
+    setSubject(sample.subject || '');
+    setSender(sample.sender || '');
+    setEmailText(sample.body || '');
+    setErrorMessage(null);
+  };
+
+  const handleRestorePreset = () => {
+    if (!selectedPresetKey || !presets[selectedPresetKey]) return;
+    const sample = presets[selectedPresetKey];
     setSubject(sample.subject || '');
     setSender(sample.sender || '');
     setEmailText(sample.body || '');
@@ -266,6 +285,8 @@ export const LiveTestPage: React.FC = () => {
     setSender('');
     setEmailText('');
     setSelectedPresetKey('');
+    setCustomExpectedLabel('unlabeled');
+    setEmailInputMode('preset');
     setIsInjectEnabled(false);
     setSingleResult(null);
     setCompareResult(null);
@@ -506,20 +527,57 @@ export const LiveTestPage: React.FC = () => {
                   </p>
                 </div>
 
-                {selectedSample && (
-                  <div className="flex items-center gap-2">
-                    <Badge
-                      variant={selectedSample.label === 'phishing' ? 'phishing' : 'legitimate'}
-                      size="sm"
-                      dot
-                    >
-                      Ground Truth: {selectedSample.label.toUpperCase()}
-                    </Badge>
-                    <Badge variant="neutral" size="sm">
-                      Condition: {selectedSample.condition.toUpperCase()}
-                    </Badge>
-                  </div>
-                )}
+                <div className="flex items-center gap-2">
+                  {emailInputMode === 'preset' ? (
+                    selectedSample ? (
+                      !isPresetModified ? (
+                        <>
+                          <Badge
+                            variant={selectedSample.label === 'phishing' ? 'phishing' : 'legitimate'}
+                            size="sm"
+                            dot
+                          >
+                            Ground Truth: {selectedSample.label.toUpperCase()}
+                          </Badge>
+                          <Badge variant="neutral" size="sm">
+                            Condition: {selectedSample.condition.toUpperCase()}
+                          </Badge>
+                        </>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <Badge variant="injection" size="sm" dot>
+                            Ground Truth: MODIFIED (CUSTOM CONTENT)
+                          </Badge>
+                          <button
+                            type="button"
+                            onClick={handleRestorePreset}
+                            className="text-[10px] text-teal-400 hover:text-teal-300 underline font-mono ml-1"
+                          >
+                            Restore
+                          </button>
+                        </div>
+                      )
+                    ) : (
+                      <Badge variant="neutral" size="sm">
+                        Ground Truth: SELECT PRESET
+                      </Badge>
+                    )
+                  ) : (
+                    customExpectedLabel !== 'unlabeled' ? (
+                      <Badge
+                        variant={customExpectedLabel === 'phishing' ? 'phishing' : 'legitimate'}
+                        size="sm"
+                        dot
+                      >
+                        Expected GT: {customExpectedLabel.toUpperCase()}
+                      </Badge>
+                    ) : (
+                      <Badge variant="neutral" size="sm">
+                        Ground Truth: UNLABELED (CUSTOM)
+                      </Badge>
+                    )
+                  )}
+                </div>
               </div>
 
               {/* =========================================================================
@@ -730,16 +788,33 @@ export const LiveTestPage: React.FC = () => {
                         {selectedSample && (
                           <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-2.5 flex flex-wrap items-center justify-between gap-2">
                             <div className="flex items-center gap-2">
-                              <Badge
-                                variant={selectedSample.label === 'phishing' ? 'phishing' : 'legitimate'}
-                                size="sm"
-                                dot
-                              >
-                                Ground Truth: {selectedSample.label.toUpperCase()}
-                              </Badge>
-                              <Badge variant="neutral" size="sm">
-                                Condition: {selectedSample.condition.toUpperCase()}
-                              </Badge>
+                              {!isPresetModified ? (
+                                <>
+                                  <Badge
+                                    variant={selectedSample.label === 'phishing' ? 'phishing' : 'legitimate'}
+                                    size="sm"
+                                    dot
+                                  >
+                                    Ground Truth: {selectedSample.label.toUpperCase()}
+                                  </Badge>
+                                  <Badge variant="neutral" size="sm">
+                                    Condition: {selectedSample.condition.toUpperCase()}
+                                  </Badge>
+                                </>
+                              ) : (
+                                <div className="flex items-center gap-1.5">
+                                  <Badge variant="injection" size="sm" dot>
+                                    Preset Modified
+                                  </Badge>
+                                  <button
+                                    type="button"
+                                    onClick={handleRestorePreset}
+                                    className="text-[10px] text-teal-400 hover:text-teal-300 underline font-mono"
+                                  >
+                                    Revert to Preset
+                                  </button>
+                                </div>
+                              )}
                             </div>
                             <CharacterCounter
                               count={emailText.length}
@@ -832,6 +907,38 @@ export const LiveTestPage: React.FC = () => {
                             placeholder="Paste raw email body here, or draft custom content..."
                             className="w-full rounded-xl bg-slate-950 border border-slate-800 p-4 text-xs sm:text-sm text-slate-200 font-mono leading-relaxed focus:outline-none focus:border-teal-500 focus-visible:ring-2 focus-visible:ring-teal-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 transition-colors resize-y"
                           />
+                        </div>
+
+                        {/* Diagnostic Expected Ground Truth Selector */}
+                        <div className="space-y-1.5 pt-1">
+                          <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
+                            <span>Diagnostic Expected Ground Truth</span>
+                            <span className="text-[10px] text-slate-400 font-normal">Sandbox benchmark marker</span>
+                          </label>
+                          <div className="grid grid-cols-3 gap-2">
+                            {[
+                              { id: 'unlabeled', label: 'Unspecified' },
+                              { id: 'legitimate', label: 'Expected: GENUINE' },
+                              { id: 'phishing', label: 'Expected: PHISHING' },
+                            ].map((opt) => (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() => setCustomExpectedLabel(opt.id as any)}
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                                  customExpectedLabel === opt.id
+                                    ? opt.id === 'phishing'
+                                      ? 'bg-rose-500/20 border-rose-500/50 text-rose-300 font-semibold shadow-sm'
+                                      : opt.id === 'legitimate'
+                                      ? 'bg-teal-500/20 border-teal-500/50 text-teal-300 font-semibold shadow-sm'
+                                      : 'bg-slate-800 border-slate-600 text-slate-200 font-semibold shadow-sm'
+                                    : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                                }`}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       </motion.div>
                     )}
