@@ -22,7 +22,7 @@ export const Layout: React.FC = () => {
           <div className="flex items-center gap-2">
             <span className="font-semibold text-slate-300 font-['Plus_Jakarta_Sans',sans-serif]">IFSI</span>
             <span>&bull;</span>
-            <span>By <strong className="text-slate-200 font-medium">Siddharth Singh &amp; Sanchit Kukreja</strong></span>
+            <span>Phishing Detection</span>
           </div>
           <div className="flex items-center gap-4 text-slate-400">
             <a
