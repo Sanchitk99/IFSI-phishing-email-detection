@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { FlaskConical } from 'lucide-react';
 import {
   apiClient,
+  ApiError,
   type BenchmarkSummary,
   type PresetSample,
   type ClassificationResult,
@@ -9,7 +10,7 @@ import {
   type AttackFamilyExample,
   type ModelCatalog,
 } from '../api/client';
-import { OfflineFallbackBanner } from '../components/OfflineFallbackBanner';
+import { OfflineFallbackBanner, type FallbackReason } from '../components/OfflineFallbackBanner';
 import { motion } from 'framer-motion';
 import { fadeInUp } from '../lib/motion';
 import { useTheme } from '../hooks/useTheme';
@@ -46,6 +47,7 @@ export const InjectionLabPage: React.FC = () => {
 
   const [familyExamples, setFamilyExamples] = useState<Record<string, AttackFamilyExample> | null>(null);
   const [isUsingFallback, setIsUsingFallback] = useState<boolean>(false);
+  const [fallbackReason, setFallbackReason] = useState<FallbackReason>('cached_data');
 
   // =========================================================================
   // SECTION 1: EXPLORER STATE
@@ -100,6 +102,7 @@ export const InjectionLabPage: React.FC = () => {
       .catch((err) => {
         console.error('Failed to load benchmark summary:', err);
         if (!mounted) return;
+        setFallbackReason(err instanceof ApiError && err.status === 404 ? 'benchmark_unavailable' : 'backend_unavailable');
         setIsUsingFallback(true);
         setSummaryError('Failed to load benchmark summary data.');
         setLoadingSummary(false);
@@ -121,6 +124,7 @@ export const InjectionLabPage: React.FC = () => {
       .catch((err) => {
         console.warn('Could not fetch remote injection examples; using dataset fallbacks:', err);
         if (!mounted) return;
+        setFallbackReason(err instanceof ApiError && err.status === 404 ? 'benchmark_unavailable' : 'backend_unavailable');
         setIsUsingFallback(true);
       });
 
@@ -145,6 +149,7 @@ export const InjectionLabPage: React.FC = () => {
         console.error('Failed to load presets:', err);
         if (!mounted) return;
         setLoadingPresets(false);
+        setFallbackReason(err instanceof ApiError && err.status === 404 ? 'benchmark_unavailable' : 'backend_unavailable');
         setIsUsingFallback(true);
       });
 
@@ -379,6 +384,7 @@ export const InjectionLabPage: React.FC = () => {
       {/* Unmissable Fallback Warning Banner */}
       {isUsingFallback && (
         <OfflineFallbackBanner
+          reason={fallbackReason}
           onRetry={() => window.location.reload()}
         />
       )}

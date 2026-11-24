@@ -36,9 +36,10 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Pre-cache ONNX embedding model to eliminate cold-start runtime downloads
 RUN python -c "from huggingface_hub import hf_hub_download; hf_hub_download('sentence-transformers/all-MiniLM-L6-v2', 'onnx/model.onnx'); hf_hub_download('sentence-transformers/all-MiniLM-L6-v2', 'tokenizer.json')"
 
-# Copy trained M1 model artifact and clean RAG exemplars
+# Copy trained M1 model artifact, clean RAG exemplars, and benchmark summary data
 COPY models/ ./models/
 COPY results/rag_index_clean/ ./results/rag_index_clean/
+COPY results/full_benchmark_summary.json results/report.md ./results/
 
 # Copy compiled frontend from Stage 1 into frontend/dist
 COPY --from=frontend-builder /build/dist/ ./frontend/dist/

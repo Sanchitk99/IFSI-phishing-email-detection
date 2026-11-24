@@ -20,9 +20,10 @@ import {
   type CompareResponse,
   type PresetSample,
   type ModelCatalog,
+  ApiError,
 } from '../api/client';
 import { Card } from '../components/Card';
-import { OfflineFallbackBanner } from '../components/OfflineFallbackBanner';
+import { OfflineFallbackBanner, type FallbackReason } from '../components/OfflineFallbackBanner';
 import { Badge } from '../components/Badge';
 import { MethodResultCard } from '../components/MethodResultCard';
 import { DisagreementConnector } from '../components/DisagreementConnector';
@@ -175,6 +176,7 @@ export const LiveTestPage: React.FC = () => {
   const [customExpectedLabel, setCustomExpectedLabel] = useState<'unlabeled' | 'phishing' | 'legitimate'>('unlabeled');
   const [loadingPresets, setLoadingPresets] = useState(true);
   const [isUsingFallback, setIsUsingFallback] = useState(false);
+  const [fallbackReason, setFallbackReason] = useState<FallbackReason>('backend_unavailable');
 
   // Execution & Output States
   const [isLoading, setIsLoading] = useState(false);
@@ -242,6 +244,7 @@ export const LiveTestPage: React.FC = () => {
         console.error('Failed to load preset emails:', err);
         if (mounted) {
           setLoadingPresets(false);
+          setFallbackReason(err instanceof ApiError && err.status === 404 ? 'benchmark_unavailable' : 'backend_unavailable');
           setIsUsingFallback(true);
         }
       });
@@ -424,6 +427,7 @@ export const LiveTestPage: React.FC = () => {
       {/* Unmissable Fallback Warning Banner */}
       {isUsingFallback && (
         <OfflineFallbackBanner
+          reason={fallbackReason}
           onRetry={() => window.location.reload()}
         />
       )}

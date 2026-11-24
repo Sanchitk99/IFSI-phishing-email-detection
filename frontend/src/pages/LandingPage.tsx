@@ -17,9 +17,9 @@ import {
   ChevronDown,
   Network,
 } from 'lucide-react';
-import { apiClient, type BenchmarkSummary } from '../api/client';
+import { apiClient, ApiError, type BenchmarkSummary } from '../api/client';
 import { Card } from '../components/Card';
-import { OfflineFallbackBanner } from '../components/OfflineFallbackBanner';
+import { OfflineFallbackBanner, type FallbackReason } from '../components/OfflineFallbackBanner';
 import { Badge } from '../components/Badge';
 import { SkeletonCard } from '../components/Skeleton';
 import { InjectedEmailGraphic } from '../components/InjectedEmailGraphic';
@@ -49,6 +49,7 @@ export const LandingPage: React.FC = () => {
   const [summary, setSummary] = useState<BenchmarkSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [isUsingFallback, setIsUsingFallback] = useState(false);
+  const [fallbackReason, setFallbackReason] = useState<FallbackReason>('cached_data');
   const [hoveredMethod, setHoveredMethod] = useState<'M1' | 'M2' | 'M3' | 'M4' | null>(null);
   const [expandedMethodology, setExpandedMethodology] = useState<Record<string, boolean>>({});
   const [expandedLimitations, setExpandedLimitations] = useState<Record<string, boolean>>({});
@@ -75,6 +76,7 @@ export const LandingPage: React.FC = () => {
       .catch((err) => {
         console.error('Failed to load summary stats:', err);
         if (!mounted) return;
+        setFallbackReason(err instanceof ApiError && err.status === 404 ? 'benchmark_unavailable' : 'backend_unavailable');
         setIsUsingFallback(true);
         setLoading(false);
       });
@@ -273,6 +275,7 @@ export const LandingPage: React.FC = () => {
       {/* Fallback Banner */}
       {isUsingFallback && (
         <OfflineFallbackBanner
+          reason={fallbackReason}
           onRetry={() => window.location.reload()}
         />
       )}

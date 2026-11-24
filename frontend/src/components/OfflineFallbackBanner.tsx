@@ -2,23 +2,59 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { AlertTriangle, RefreshCw, WifiOff } from 'lucide-react';
 
+export type FallbackReason = 'backend_unavailable' | 'benchmark_unavailable' | 'cached_data';
+
 export interface OfflineFallbackBannerProps {
   message?: string;
   details?: string;
+  badgeText?: string;
+  reason?: FallbackReason;
   onRetry?: () => void;
   className?: string;
 }
 
 /**
  * High-visibility unmissable banner displayed when a page is showing fallback or cached data
- * because the FastAPI backend server is unreachable.
+ * because the FastAPI backend server or precomputed benchmark datasets are unreachable.
  */
 export const OfflineFallbackBanner: React.FC<OfflineFallbackBannerProps> = ({
-  message = 'Showing cached/offline data — backend unreachable',
-  details = 'The local FastAPI backend (http://localhost:8000) could not be contacted. Displaying pre-computed snapshot data instead of live model inference.',
+  reason = 'cached_data',
+  message,
+  details,
+  badgeText,
   onRetry,
   className = '',
 }) => {
+  const isLocalDev =
+    typeof window !== 'undefined' &&
+    (window.location.port === '5173' ||
+      window.location.port === '4173' ||
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1');
+
+  const resolvedBadge =
+    badgeText ||
+    (reason === 'benchmark_unavailable'
+      ? 'Benchmark Offline'
+      : reason === 'backend_unavailable'
+      ? 'Backend Unreachable'
+      : 'Offline Snapshot');
+
+  const resolvedMessage =
+    message ||
+    (reason === 'benchmark_unavailable'
+      ? 'Showing cached benchmark data — precomputed results unavailable'
+      : reason === 'backend_unavailable'
+      ? 'FastAPI backend unreachable — showing offline fallback data'
+      : 'Showing cached/offline data — live service degraded');
+
+  const resolvedDetails =
+    details ||
+    (reason === 'benchmark_unavailable'
+      ? 'The classification backend is operational, but precomputed benchmark dataset records could not be loaded. Displaying bundled snapshot statistics.'
+      : reason === 'backend_unavailable'
+      ? `The FastAPI backend${isLocalDev ? ' (http://localhost:8000)' : ''} could not be contacted. Verify that the backend server is running and accessible.`
+      : 'Displaying pre-computed snapshot data instead of live model inference.');
   return (
     <motion.div
       initial={{ opacity: 0, y: -12, scale: 0.99 }}
@@ -45,15 +81,15 @@ export const OfflineFallbackBanner: React.FC<OfflineFallbackBannerProps> = ({
             <div className="flex items-center gap-2 flex-wrap">
               <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-amber-500/25 border border-amber-400/50 text-[11px] font-black tracking-wider uppercase text-amber-300">
                 <WifiOff className="h-3 w-3" />
-                Offline Snapshot
+                {resolvedBadge}
               </span>
               <h3 className="text-base sm:text-lg font-black tracking-tight text-white drop-shadow">
-                {message}
+                {resolvedMessage}
               </h3>
             </div>
-            {details && (
+            {resolvedDetails && (
               <p className="text-xs sm:text-sm text-amber-200/90 font-medium leading-relaxed max-w-3xl">
-                {details}
+                {resolvedDetails}
               </p>
             )}
           </div>

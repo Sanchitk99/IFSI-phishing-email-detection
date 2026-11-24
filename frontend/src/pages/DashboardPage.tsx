@@ -2,12 +2,13 @@ import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { BarChart3 } from 'lucide-react';
 import {
   apiClient,
+  ApiError,
   type BenchmarkSummary,
   type McNemarResponse,
   type MistakeRecord,
   type McNemarTestResult,
 } from '../api/client';
-import { OfflineFallbackBanner } from '../components/OfflineFallbackBanner';
+import { OfflineFallbackBanner, type FallbackReason } from '../components/OfflineFallbackBanner';
 import { motion, useInView } from 'framer-motion';
 import { fadeInUp } from '../lib/motion';
 import { useCountUp } from '../hooks/useCountUp';
@@ -40,6 +41,7 @@ export const DashboardPage: React.FC = () => {
   const [mistakes, setMistakes] = useState<MistakeRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isUsingFallback, setIsUsingFallback] = useState(false);
+  const [fallbackReason, setFallbackReason] = useState<FallbackReason>('cached_data');
 
   // Reactive Filter States
   const [filterMethod, setFilterMethod] = useState<string>('all');
@@ -73,6 +75,7 @@ export const DashboardPage: React.FC = () => {
       .catch((err) => {
         console.error('Failed to load dashboard benchmark data:', err);
         if (!mounted) return;
+        setFallbackReason(err instanceof ApiError && err.status === 404 ? 'benchmark_unavailable' : 'backend_unavailable');
         setIsUsingFallback(true);
         setIsLoading(false);
       });
@@ -307,6 +310,7 @@ export const DashboardPage: React.FC = () => {
       {/* Unmissable Fallback Warning Banner */}
       {isUsingFallback && (
         <OfflineFallbackBanner
+          reason={fallbackReason}
           onRetry={() => window.location.reload()}
         />
       )}
